@@ -220,8 +220,8 @@ async function main() {
   // Time off allocations for Admin
   await prisma.timeOffAllocation.createMany({
     data: [
-      { employeeId: superAdminEmp.id, timeOffTypeId: paidTimeOffType.id, allocatedDays: 24, takenDays: 0, remainingDays: 24, year: 2026 },
-      { employeeId: superAdminEmp.id, timeOffTypeId: sickLeaveType.id, allocatedDays: 12, takenDays: 0, remainingDays: 12, year: 2026 },
+      { employeeId: superAdminEmp.id, timeOffTypeId: typePaid.id, allocatedDays: 24, takenDays: 0, remainingDays: 24, year: 2026 },
+      { employeeId: superAdminEmp.id, timeOffTypeId: typeSick.id, allocatedDays: 12, takenDays: 0, remainingDays: 12, year: 2026 },
     ],
   });
 
