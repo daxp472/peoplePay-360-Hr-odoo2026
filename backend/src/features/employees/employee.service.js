@@ -10,18 +10,29 @@ class EmployeeService {
     // If employee role, restrict to viewing self if requested
     if (user.role === 'EMPLOYEE' && user.employeeId) {
       const emp = await employeeRepository.findById(user.employeeId);
-      return emp ? [emp] : [];
+      return { data: emp ? [emp] : [], total: emp ? 1 : 0, page: 1, limit: 25, totalPages: 1 };
     }
 
-    const cacheKey = `emp_${JSON.stringify(query || {})}_${user.role}_${user.employeeId || ''}`;
+    const q = { ...query };
+    if (user && user.role === 'HR_MANAGER' && q.scope === 'subordinates') {
+      const subIds = await this.getSubordinateIdsForUser(user);
+      if (subIds !== null && subIds.length > 0) {
+        q.subordinateIds = subIds;
+      }
+    }
+
+    const cacheKey = `emp_${JSON.stringify(q || {})}_${user.role}_${user.employeeId || ''}`;
     const cached = employeeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       return cached.data;
     }
 
-    const employees = await employeeRepository.findAll(query);
+    const result = await employeeRepository.findAll(q);
+    const employees = result.data;
 
-    if (employees.length === 0) return [];
+    if (employees.length === 0) {
+      return { ...result, data: [] };
+    }
 
     // Batch fetch active contracts and leave allocations in 2 queries instead of 2 * N queries
     const empIds = employees.map((e) => e.id);
@@ -60,8 +71,9 @@ class EmployeeService {
       };
     });
 
-    employeeCache.set(cacheKey, { timestamp: Date.now(), data: enriched });
-    return enriched;
+    const enrichedResult = { ...result, data: enriched };
+    employeeCache.set(cacheKey, { timestamp: Date.now(), data: enrichedResult });
+    return enrichedResult;
   }
 
   async getEmployeeById(id, user) {
@@ -203,6 +215,23 @@ class EmployeeService {
     });
 
     return { message: 'Employee deleted successfully.' };
+  }
+
+  async getSubordinateIdsForUser(user) {
+    if (!user || user.role === 'ADMIN') return null; // Global access
+    if (user.role === 'EMPLOYEE') {
+      return user.employeeId ? [user.employeeId] : [];
+    }
+
+    if (!user.employeeId) return null;
+
+    // Find direct subordinates
+    const subs = await prisma.employee.findMany({
+      where: { managerId: user.employeeId },
+      select: { id: true },
+    });
+
+    return subs.map((s) => s.id);
   }
 }
 

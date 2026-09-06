@@ -1,7 +1,8 @@
 const prisma = require('../../config/database');
+const { paginate, paginateResult } = require('../../utils/paginate');
 
 class EmployeeRepository {
-  async findAll({ search, departmentId, status, employeeType }) {
+  async findAll({ search, departmentId, status, employeeType, managerId, subordinateIds, page, limit } = {}) {
     const where = {};
     if (search) {
       where.OR = [
@@ -13,29 +14,42 @@ class EmployeeRepository {
     if (departmentId) where.departmentId = parseInt(departmentId, 10);
     if (status) where.status = status;
     if (employeeType) where.employeeType = employeeType;
+    if (managerId) where.managerId = parseInt(managerId, 10);
+    if (subordinateIds && Array.isArray(subordinateIds)) {
+      where.id = { in: subordinateIds.length > 0 ? subordinateIds : [-1] };
+    }
 
-    return prisma.employee.findMany({
-      where,
-      include: {
-        department: true,
-        jobPosition: true,
-        manager: {
-          select: { id: true, name: true, employeeId: true },
-        },
-        workingSchedule: {
-          select: { id: true, name: true, weeklyHours: true },
-        },
-        _count: {
-          select: {
-            contracts: true,
-            attendance: true,
-            payslips: true,
-            timeOffRequests: true,
+    const { page: p, limit: l, skip } = paginate({ page, limit });
+
+    const [data, total] = await Promise.all([
+      prisma.employee.findMany({
+        where,
+        include: {
+          department: true,
+          jobPosition: true,
+          manager: {
+            select: { id: true, name: true, employeeId: true },
+          },
+          workingSchedule: {
+            select: { id: true, name: true, weeklyHours: true },
+          },
+          _count: {
+            select: {
+              contracts: true,
+              attendance: true,
+              payslips: true,
+              timeOffRequests: true,
+            },
           },
         },
-      },
-      orderBy: { employeeId: 'asc' },
-    });
+        orderBy: { employeeId: 'asc' },
+        skip,
+        take: l,
+      }),
+      prisma.employee.count({ where }),
+    ]);
+
+    return paginateResult(data, total, p, l);
   }
 
   async findById(id) {

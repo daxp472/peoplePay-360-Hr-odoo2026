@@ -5,41 +5,54 @@ import {
 } from 'lucide-react';
 import api from '../api/client';
 import ControlPanel from '../components/ControlPanel';
+import Pagination from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState([]);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 50, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
   const [entityFilter, setEntityFilter] = useState('');
   const [selectedLog, setSelectedLog] = useState(null);
 
-  useEffect(() => {
-    fetchLogs();
-  }, [entityFilter]);
+  useEffect(() => { fetchLogs(1); }, [entityFilter, debouncedSearch]);
 
-  async function fetchLogs() {
+  const formatValue = (val) => {
+    if (!val) return 'None';
+    if (typeof val === 'object') return JSON.stringify(val, null, 2);
+    try {
+      const parsed = JSON.parse(val);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return String(val);
+    }
+  };
+
+  async function fetchLogs(page = pagination.page) {
     setLoading(true);
     try {
-      let url = '/audit?limit=100';
-      if (entityFilter) url += `&entityName=${entityFilter}`;
-      const res = await api.get(url);
-      setLogs(res.data);
+      const params = { page, limit: 50 };
+      if (entityFilter) params.entityName = entityFilter;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+      const res = await api.get('/audit', { params });
+      const envelope = res.data;
+      const list = Array.isArray(envelope.data) ? envelope.data : Array.isArray(envelope) ? envelope : [];
+      setLogs(list);
+      if (envelope.total !== undefined) {
+        setPagination({ total: envelope.total, page: envelope.page, limit: envelope.limit, totalPages: envelope.totalPages });
+      }
     } catch (err) {
       console.error('Failed to load audit logs:', err);
+      setLogs([]);
     } finally {
       setLoading(false);
     }
   }
 
-  const filteredLogs = logs.filter((log) => {
-    const q = searchTerm.toLowerCase();
-    return (
-      log.action.toLowerCase().includes(q) ||
-      (log.entityName && log.entityName.toLowerCase().includes(q)) ||
-      (log.user && (log.user.name?.toLowerCase().includes(q) || log.user.email.toLowerCase().includes(q))) ||
-      (log.entityId && log.entityId.toLowerCase().includes(q))
-    );
-  });
+  // Logs are already filtered server-side
+  const filteredLogs = logs;
 
   const actionColors = {
     PAYRUN_COMPUTED: 'bg-teal-100 text-teal-800 border-teal-200',
@@ -71,6 +84,7 @@ export default function AuditLogsPage() {
           </button>
         }
         searchPlaceholder="Filter by action, entity, or actor..."
+        searchQuery={searchTerm}
         onSearchChange={setSearchTerm}
       />
 
@@ -91,23 +105,32 @@ export default function AuditLogsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-            <label className="text-xs text-slate-600 font-medium">Filter Entity:</label>
-            <select
-              value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
-              className="px-3 py-1.5 border border-slate-300 rounded text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#714B67]"
-            >
-              <option value="">All Entities</option>
-              <option value="Payrun">Payrun</option>
-              <option value="Attendance">Attendance</option>
-              <option value="TimeOffRequest">TimeOffRequest</option>
-              <option value="Employee">Employee</option>
-              <option value="Contract">Contract</option>
-              <option value="SalaryStructure">SalaryStructure</option>
-              <option value="SalaryRule">SalaryRule</option>
-              <option value="User">User</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-600 font-medium">Filter Entity:</label>
+              <select
+                value={entityFilter}
+                onChange={(e) => setEntityFilter(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#714B67]"
+              >
+                <option value="">All Entities</option>
+                <option value="Payrun">Payrun</option>
+                <option value="Attendance">Attendance</option>
+                <option value="TimeOffRequest">TimeOffRequest</option>
+                <option value="Employee">Employee</option>
+                <option value="Contract">Contract</option>
+                <option value="SalaryStructure">SalaryStructure</option>
+                <option value="SalaryRule">SalaryRule</option>
+                <option value="User">User</option>
+              </select>
+            </div>
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              limit={pagination.limit}
+              onPageChange={(p) => fetchLogs(p)}
+            />
           </div>
         </div>
 
@@ -214,13 +237,7 @@ export default function AuditLogsPage() {
                   Previous State
                 </h4>
                 <pre className="font-mono bg-white p-2.5 rounded border border-rose-200 text-rose-900 overflow-x-auto whitespace-pre-wrap max-h-60 text-[11px]">
-                  {selectedLog.previousValue ? (
-                    typeof selectedLog.previousValue === 'object' 
-                      ? JSON.stringify(selectedLog.previousValue, null, 2)
-                      : selectedLog.previousValue
-                  ) : (
-                    'None / Initial creation'
-                  )}
+                  {formatValue(selectedLog.previousValue)}
                 </pre>
               </div>
 
@@ -229,13 +246,7 @@ export default function AuditLogsPage() {
                   New State / Changes
                 </h4>
                 <pre className="font-mono bg-white p-2.5 rounded border border-emerald-200 text-emerald-900 overflow-x-auto whitespace-pre-wrap max-h-60 text-[11px]">
-                  {selectedLog.newValue ? (
-                    typeof selectedLog.newValue === 'object'
-                      ? JSON.stringify(selectedLog.newValue, null, 2)
-                      : selectedLog.newValue
-                  ) : (
-                    'None / Deletion'
-                  )}
+                  {formatValue(selectedLog.newValue)}
                 </pre>
               </div>
             </div>
